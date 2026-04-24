@@ -1,204 +1,187 @@
-# MyTranscriber — Project Status & Dev Log
+# MyTranscriber — Dev Log
 
-> Personal AI meeting transcriber — record, transcribe and summarize 
-> meetings locally. No subscription. No cloud. 100% private.
-
----
-
-## 🏆 PHASE 1 — COMPLETE ✅
-**Completed: 24 April 2026**
-
-### What I Built:
-A fully working Electron desktop app that:
-- Captures computer audio or mic+system audio
-- Transcribes using OpenAI Whisper
-- Summarizes using GPT-4o-mini
-- Stores everything locally in SQLite
-- Google OAuth login
-- Tier system (Free/Pro/Max)
+> I got tired of paying for Fireflies.ai every month just to transcribe 
+> my own meetings. So I built my own version that runs completely on my 
+> laptop. No subscription. No cloud. Everything stays on my device.
 
 ---
 
-## 📦 TECH STACK DECISIONS
+## Why I Built This
 
-| Layer | Technology | Why I Chose It |
-|-------|-----------|----------------|
-| Desktop | Electron | Best for Windows desktop + web tech |
-| Frontend | React + Vite | Fast dev, component based |
-| Backend | Express.js | Simple, flexible Node.js API |
-| Database | SQLite (better-sqlite3) | Local, no server needed |
-| Transcription | OpenAI Whisper | Best accuracy, cheap ($0.006/min) |
-| Summarization | OpenAI GPT-4o-mini | Fast, cheap, high quality |
-| Auth | Google OAuth + Passport.js | Easy login, no passwords |
+I use Zoom and Google Meet a lot. After every call I would forget half 
+of what was discussed. Fireflies.ai is great but $18/month for a student 
+is too much. I thought — how hard can it be to build something similar?
+
+Turns out, pretty hard. But I did it anyway.
 
 ---
 
-## 🗺️ BUILD ORDER (What I Built and When)
+## What It Does
 
-### Commit 1 — CLAUDE.md (Karpathy Coding Rules)
-- Think before coding
-- Simplicity first
-- Surgical changes only
-- Goal-driven execution
-
-### Commit 2 — Project Configuration
-- package.json (Electron + React + Vite + Express)
-- .env.example with all required keys
-- .gitignore for node_modules, .env, data/
-
-### Commit 3 — Config Layer
-- backend/config/models.js — LLM model per tier
-- backend/config/tiers.js — feature flags per tier
-
-### Commit 4 — Service Layer
-- DatabaseService.js — SQLite CRUD operations
-- AuthService.js — Google OAuth with Passport
-- TranscriptService.js — Whisper audio transcription
-- SummaryService.js — LLM meeting analysis
-
-### Commit 5 — Backend API
-- server.js — Express app, CORS, sessions
-- authRoutes.js — /auth/google, /auth/me, /auth/logout
-- recordingRoutes.js — upload, fetch, delete recordings
-- Tested: health check ✅ auth/me ✅ Google login ✅
-
-### Commit 6 — React Frontend
-- Login.jsx — Google OAuth button, feature list
-- Home.jsx — Two record buttons, waveform, timer
-- TranscriptDetail.jsx — Summary + transcript tabs
-- Settings.jsx — Account info, tier comparison table
-- Sidebar.jsx — Navigation + tier badge
-- RecordingCard.jsx — Recording list item
-
-### Commit 7 — Project Docs
-- PROJECT_STATUS.md (this file)
-- project-carry-forward.skill.md
-
-### Commit 8 — Electron Core + Bug Fixes
-- electron/main.js — Window creation, IPC, audio capture
-- electron/preload.js — Secure IPC bridge to React
-- Fixed: Electron white screen (wait-on + app.isPackaged)
-- Fixed: axios baseURL for Electron (localhost:5000)
-- Fixed: tiers.js was empty → added hasFeature()
-- Fixed: Whisper via OpenRouter → switched to OpenAI direct
-- Fixed: Session cookie in Electron → flexAuth + uid header
-- Fixed: OpenRouter LLM unreliable → OpenAI gpt-4o-mini
-- Fixed: Settings name blank → user.name not user.displayName
-- Fixed: Settings page not scrollable → overflowY style
+- I click a button and it starts recording whatever is playing on my computer
+- When I stop, it automatically sends the audio to OpenAI Whisper
+- Whisper converts speech to text
+- Then GPT-4o-mini reads the transcript and writes a summary
+- Everything is saved locally in a SQLite database on my laptop
+- I can go back and read any past meeting anytime
 
 ---
 
-## 🔧 PROBLEMS I SOLVED
+## Tech I Used and Why
 
-### Problem 1: Electron White Screen
-**Symptom:** Desktop window opened but showed nothing  
-**Root Cause:** Electron loaded before Vite dev server was ready  
-**Solution:** Used `concurrently` + `wait-on` to start Vite first,
-then Electron. Also fixed `isDev` detection using `app.isPackaged`
-instead of `NODE_ENV` which wasn't being passed correctly.
+**Electron** — I wanted a real desktop app, not a website. Electron lets 
+me use web technologies (React) but package it as a Windows .exe file.
 
-### Problem 2: Session Cookies Broken in Electron
-**Symptom:** 401 Unauthorized on every API call after login  
-**Root Cause:** Electron and Express run on different ports.
-Browser session cookies don't carry across ports in Electron.  
-**Solution:** After Google login, stored user ID in localStorage.
-Added `x-user-id` header to all axios requests.
-Added `flexAuth` middleware that accepts session OR header auth.
+**React + Vite** — I already know React. Vite is much faster than 
+Create React App for development.
 
-### Problem 3: OpenRouter Not Supporting Whisper
-**Symptom:** Connection error when trying to transcribe audio  
-**Root Cause:** OpenRouter routes LLM text models but does NOT
-support audio file uploads for Whisper transcription.  
-**Solution:** Switched TranscriptService to use OpenAI API directly.
-Kept OpenRouter as backup option for future LLM calls.
+**Express.js** — Simple Node.js backend. I needed an API server to handle 
+file uploads, database operations, and OAuth.
 
-### Problem 4: tiers.js Was Empty
-**Symptom:** `hasFeature is not a function` error  
-**Root Cause:** File was created in folder structure but
-content was never written — empty file.  
-**Solution:** Wrote complete tiers.js with TIERS config object,
-`hasFeature()` and `getTierConfig()` functions.
+**SQLite** — No need for a separate database server. SQLite stores 
+everything in a single file on my laptop. Perfect for a local app.
+
+**OpenAI Whisper** — Best speech-to-text model available. Costs about 
+$0.006 per minute which is extremely cheap.
+
+**Google OAuth** — I did not want to build a login system from scratch. 
+Google OAuth handles everything securely.
 
 ---
 
-## 🔑 ENVIRONMENT VARIABLES
+## Problems I Hit (And How I Fixed Them)
 
-```env
-OPENAI_API_KEY=        # For Whisper + GPT-4o-mini
-OPENROUTER_API_KEY=    # Backup LLM (future use)
-GOOGLE_CLIENT_ID=      # Google OAuth
-GOOGLE_CLIENT_SECRET=  # Google OAuth
-GOOGLE_CALLBACK_URL=   # http://localhost:5000/auth/google/callback
-SESSION_SECRET=        # Express session encryption
-PORT=5000
-FRONTEND_URL=          # http://localhost:5173
-NODE_ENV=development
-```
+### The Electron White Screen Problem
+When I first ran the Electron app, it just showed a blank white window. 
+Nothing loaded. I spent time figuring out that Electron was starting 
+before the Vite dev server was ready. Fixed it by using `wait-on` package 
+to make Electron wait until Vite is fully running.
+
+Also had another issue — `isDev` was always `false` because `NODE_ENV` 
+was not being passed to Electron correctly. Changed the detection to use 
+`app.isPackaged` instead which works reliably.
+
+### The Cookie Problem in Electron
+After Google login worked fine in the browser, I moved to Electron and 
+suddenly every API call returned 401 Unauthorized. 
+
+The problem was that the session cookie from Express (port 5000) was not 
+being shared with the Electron window (port 5173). They are on different 
+ports so the browser treats them as different origins.
+
+My solution: after login, I store the user ID in localStorage. Then I 
+send it as a custom header `x-user-id` with every API request. On the 
+backend I added a `flexAuth` middleware that accepts either a valid 
+session cookie OR this header. Problem solved.
+
+### OpenRouter Does Not Support Audio
+I originally planned to use OpenRouter for everything — both Whisper 
+transcription and LLM summarization. Turns out OpenRouter only routes 
+text models. It does not support audio file uploads for Whisper.
+
+Switched TranscriptService to call OpenAI API directly. Works perfectly.
+
+### The Empty tiers.js File
+Got a weird error — `hasFeature is not a function`. Spent time debugging 
+before I realized the `tiers.js` config file existed in the folder but 
+was completely empty. It was created during the project setup but the 
+content was never written. Wrote the complete file with all tier configs.
+
+### OpenRouter LLM Connection Issues
+Even for text summarization, OpenRouter kept giving connection errors 
+from my network. Rather than waste more time debugging network issues, 
+I just switched the SummaryService to use OpenAI GPT-4o-mini directly. 
+More reliable and the quality is excellent.
 
 ---
 
-## 🚀 HOW TO RUN
+## How To Run It
 
 ```bash
-# Terminal 1 — Backend
+# Start the backend API server
 node backend/server.js
 
-# Terminal 2 — Electron + Frontend
+# Start the Electron desktop app (in a second terminal)
 npm run dev
 ```
 
----
-
-## ⏳ PHASE 2 — PLANNED
-- [ ] Live transcript overlay window (always on top)
-- [ ] Speaker detection (who said what)
-- [ ] Export PDF / TXT
-- [ ] Search recordings
-
-## ⏳ PHASE 3 — PLANNED
-- [ ] Stripe / Razorpay payment gateway
-- [ ] Pro and Max tier unlock
-
-## ⏳ PHASE 4 — PLANNED
-- [ ] HuggingFace Spaces web deployment
-
-## ⏳ PHASE 5 — PLANNED
-- [ ] Android app via Capacitor
-- [ ] iOS app via Capacitor
+Make sure you have a `.env` file with:
+- `OPENAI_API_KEY` — for Whisper and GPT-4o-mini
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` — for login
 
 ---
 
-## 📁 FOLDER STRUCTURE
+## Folder Structure
+
 
 
 mytranscriber/
 ├── electron/
-│   ├── main.js          # Electron main process
-│   └── preload.js       # Secure IPC bridge
+│   ├── main.js        # Creates the desktop window, handles audio capture
+│   └── preload.js     # Secure bridge between Electron and React
 ├── backend/
-│   ├── server.js        # Express API server
+│   ├── server.js      # Express API server on port 5000
 │   ├── config/
-│   │   ├── models.js    # LLM model per tier
-│   │   └── tiers.js     # Feature flags per tier
+│   │   ├── models.js  # Which AI model to use per tier
+│   │   └── tiers.js   # What features each tier gets
 │   ├── services/
-│   │   ├── DatabaseService.js    # SQLite
-│   │   ├── AuthService.js        # Google OAuth
-│   │   ├── TranscriptService.js  # Whisper
-│   │   └── SummaryService.js     # LLM summary
+│   │   ├── DatabaseService.js    # All SQLite database operations
+│   │   ├── AuthService.js        # Google OAuth with Passport.js
+│   │   ├── TranscriptService.js  # Whisper audio transcription
+│   │   └── SummaryService.js     # GPT summary generation
 │   └── routes/
-│       ├── authRoutes.js         # /auth/*
-│       └── recordingRoutes.js    # /api/recordings/*
+│       ├── authRoutes.js         # Login, logout, user info
+│       └── recordingRoutes.js    # Upload, fetch, delete recordings
 ├── src/
 │   ├── pages/
-│   │   ├── Login.jsx
-│   │   ├── Home.jsx
-│   │   ├── TranscriptDetail.jsx
-│   │   └── Settings.jsx
+│   │   ├── Login.jsx             # Google sign in page
+│   │   ├── Home.jsx              # Main recording dashboard
+│   │   ├── TranscriptDetail.jsx  # View a single recording
+│   │   └── Settings.jsx          # Account and tier info
 │   └── components/
-│       ├── Sidebar.jsx
-│       └── RecordingCard.jsx
-├── data/                # SQLite database (gitignored)
-└── temp/                # Audio temp files (gitignored)
+│       ├── Sidebar.jsx           # Left navigation
+│       └── RecordingCard.jsx     # Recording list item
+└── data/
+└── transcriber.db            # SQLite database (all recordings)
+
 
 ---
-*Built by Kedarnath Mamani — April 2026*
+
+## What I Learned
+
+- Electron is powerful but has quirks — especially around security 
+  policies and how it handles cookies differently from browsers
+- Session management across different ports is tricky
+- OpenRouter is great for LLM text models but does not support 
+  audio/file uploads — use OpenAI directly for Whisper
+- SQLite is underrated for local desktop apps — simple and fast
+- Building something you actually need is the best motivation
+
+---
+
+## What's Next
+
+- **Live transcript overlay** — a small window that stays on top of 
+  Zoom/YouTube and shows the transcript in real time while recording
+- **Speaker detection** — figure out who said what in the meeting
+- **Export to PDF/TXT** — so I can share meeting notes easily
+- **Search** — find any past recording by keyword
+
+---
+
+## Build Log
+
+| Date | What I Did |
+|------|-----------|
+| April 2026 | Started project, set up Electron + React + Express |
+| April 2026 | Built all backend services and routes |
+| April 2026 | Built complete React frontend |
+| April 2026 | Added Electron window, fixed white screen bug |
+| April 2026 | Fixed session/cookie issues in Electron |
+| April 2026 | Switched to OpenAI for reliable transcription |
+| April 2026 | First successful recording + transcript + summary ✅ |
+
+---
+
+*Built by Kedarnath Mamani — Rajamahendravaram, Andhra Pradesh*  
+*"I built this because I needed it. Simple as that."*
