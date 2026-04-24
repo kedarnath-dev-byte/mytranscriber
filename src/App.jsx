@@ -23,7 +23,13 @@ import Settings from './pages/Settings.jsx';
 
 // Set axios to always send cookies with requests
 axios.defaults.withCredentials = true;
+axios.defaults.baseURL = 'http://localhost:5000';
 
+// Send stored user ID with every request (for Electron session)
+const storedUid = localStorage.getItem('uid');
+if (storedUid) {
+  axios.defaults.headers.common['x-user-id'] = storedUid;
+}
 export default function App() {
   const [user, setUser]       = useState(null);
   const [page, setPage]       = useState('home');
@@ -32,7 +38,17 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Check if user is already logged in on app start
-  useEffect(() => {
+ useEffect(() => {
+    // Capture uid from URL after Google OAuth redirect
+    const params = new URLSearchParams(window.location.search);
+    const uid = params.get('uid');
+    if (uid) {
+      localStorage.setItem('uid', uid);
+      axios.defaults.headers.common['x-user-id'] = uid;
+      // Clean URL
+      window.history.replaceState({}, '', '/dashboard');
+    }
+
     axios.get('/auth/me')
       .then(res => setUser(res.data.user))
       .catch(() => setUser(null))

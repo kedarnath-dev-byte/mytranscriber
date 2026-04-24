@@ -28,8 +28,11 @@ router.get('/google/callback',
     failureRedirect: `${process.env.FRONTEND_URL}?error=auth_failed`,
   }),
   (req, res) => {
-    // Success — redirect to dashboard
-    res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
+    // Pass user id in URL so Electron can store it
+    const userId = req.user.id;
+    res.redirect(
+      `${process.env.FRONTEND_URL}/dashboard?uid=${userId}`
+    );
   }
 );
 

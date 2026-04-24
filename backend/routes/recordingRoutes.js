@@ -54,9 +54,27 @@ const upload = multer({
 
 // Auth middleware — all routes require login
 const requireAuth = authService.requireAuth();
+// Allow auth via session OR uid query/header (for Electron)
+function flexAuth(req, res, next) {
+  if (req.isAuthenticated()) return next();
 
+  const uid = req.query.uid || req.headers['x-user-id'];
+  console.log('🔑 flexAuth uid received:', uid);
+
+  if (uid) {
+    const user = dbService.findUserById(uid);
+    console.log('🔑 flexAuth user found:', user?.email);
+    if (user) {
+      req.user = user;
+      return next();
+    }
+  }
+
+  console.log('❌ flexAuth failed — no valid uid');
+  res.status(401).json({ success: false, message: 'User not found.' });
+}
 // ─── Upload & Process Recording ────────────────────────────
-router.post('/upload', requireAuth, upload.single('audio'), async (req, res) => {
+router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
   const filePath = req.file?.path;
 
   try {
@@ -135,7 +153,7 @@ router.post('/upload', requireAuth, upload.single('audio'), async (req, res) => 
 });
 
 // ─── Get All Recordings ────────────────────────────────────
-router.get('/', requireAuth, (req, res) => {
+router.get('/', flexAuth, (req, res) => {
   try {
     const recordings = dbService.getRecordingsByUser(req.user.id);
     res.json({ success: true, data: recordings });
@@ -145,7 +163,7 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // ─── Get Single Recording ──────────────────────────────────
-router.get('/:id', requireAuth, (req, res) => {
+router.get('/:id', flexAuth, (req, res) => {
   try {
     const recording = dbService.getRecordingById(req.params.id);
 
@@ -163,7 +181,7 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // ─── Delete Recording ──────────────────────────────────────
-router.delete('/:id', requireAuth, (req, res) => {
+router.delete('/:id', flexAuth, (req, res) => {
   try {
     const deleted = dbService.deleteRecording(req.params.id, req.user.id);
 

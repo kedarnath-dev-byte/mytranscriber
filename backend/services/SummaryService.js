@@ -26,21 +26,17 @@ class SummaryService {
    * Initialize OpenRouter client
    * Called once during app startup
    */
-  init() {
-    if (!process.env.OPENROUTER_API_KEY) {
-      throw new Error('OPENROUTER_API_KEY is not set in .env file');
+ init() {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not set in .env file');
     }
 
+    // Using OpenAI directly for reliable connection
     this.client = new OpenAI({
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: 'https://openrouter.ai/api/v1',
-      defaultHeaders: {
-        'HTTP-Referer': 'http://localhost:5000',
-        'X-Title': 'MyTranscriber',
-      },
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
-    console.log('✅ SummaryService initialized');
+    console.log('✅ SummaryService initialized with OpenAI');
   }
 
   /**
@@ -54,31 +50,25 @@ class SummaryService {
   async analyze(transcript, tier = 'free') {
     if (!this.client) this.init();
 
-    const modelConfig = getModel('summarization', tier);
-    if (!modelConfig) {
-      throw new Error(`No model configured for tier: ${tier}`);
-    }
-
-    console.log(`🤖 Analyzing with ${modelConfig.model} (${tier} tier)`);
-
-    // Build prompt based on tier features
     const canGetActionItems = hasFeature(tier, 'actionItems');
     const prompt = this._buildPrompt(transcript, canGetActionItems);
 
+    console.log(`🤖 Analyzing with gpt-4o-mini (${tier} tier)`);
+
     const response = await this.client.chat.completions.create({
-      model: modelConfig.model,
+      model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are an expert meeting assistant. Analyze meeting transcripts and extract key information. Always respond with valid JSON only — no markdown, no explanation, just the JSON object.`,
+          content: 'You are an expert meeting assistant. Always respond with valid JSON only — no markdown, no explanation.',
         },
         {
           role: 'user',
           content: prompt,
         },
       ],
-      max_tokens: modelConfig.maxTokens,
-      temperature: 0.3,   // Low temperature for consistent structured output
+      max_tokens: 800,
+      temperature: 0.3,
     });
 
     return this._parseResponse(

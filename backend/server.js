@@ -43,11 +43,22 @@ summaryService.init();
 // ─── Middleware ────────────────────────────────────────────
 
 // CORS — allow frontend to talk to backend
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true,   // Required for session cookies
-}));
+// Allow requests from Vite dev server AND Electron
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:5173',
+  'http://localhost:5000',
+];
 
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (Electron, mobile apps)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(null, true); // Allow all in development
+  },
+  credentials: true,
+}));
 // Parse JSON request bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));

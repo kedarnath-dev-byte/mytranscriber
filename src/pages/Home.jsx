@@ -165,6 +165,7 @@ export default function Home({ user, onOpenDetail, onRecordingDone }) {
     try {
       await axios.post('/api/recordings/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        withCredentials: true,
       });
       await loadRecordings();
       onRecordingDone?.();

@@ -30,22 +30,16 @@ class TranscriptService {
    * Initialize OpenRouter client
    * Called once during app startup
    */
-  init() {
-    if (!process.env.OPENROUTER_API_KEY) {
-      throw new Error('OPENROUTER_API_KEY is not set in .env file');
+ init() {
+    if (!process.env.OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not set in .env file');
     }
-
-    // OpenRouter uses OpenAI-compatible API
+    // Use OpenAI directly for Whisper audio transcription
+    // OpenRouter does not support audio file uploads
     this.client = new OpenAI({
-      apiKey: process.env.OPENROUTER_API_KEY,
-      baseURL: 'https://openrouter.ai/api/v1',
-      defaultHeaders: {
-        'HTTP-Referer': 'http://localhost:5000',
-        'X-Title': 'MyTranscriber',
-      },
+      apiKey: process.env.OPENAI_API_KEY,
     });
-
-    console.log('✅ TranscriptService initialized');
+    console.log('✅ TranscriptService initialized with OpenAI Whisper');
   }
 
   /**
