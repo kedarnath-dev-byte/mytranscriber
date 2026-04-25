@@ -38,17 +38,22 @@ function formatDuration(seconds) {
   return `${m}:${s}`;
 }
 
-// Format date to readable string
+// Format date to readable string — IST timezone
+// Format date to readable string — converts UTC to IST
 function formatDate(dateStr) {
-  return new Date(dateStr).toLocaleDateString('en-IN', {
+  // SQLite stores UTC — add 'Z' to tell JavaScript it's UTC
+  const utcStr = dateStr.includes('Z') ? dateStr : dateStr + 'Z';
+  const date = new Date(utcStr);
+  return date.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: true,
   });
 }
-
 export default function RecordingCard({ rec, onClick, animationDelay = 0 }) {
   const meta = MODE_META[rec.mode] || MODE_META.system;
   const tierColor = TIER_COLORS[rec.tier_used] || TIER_COLORS.free;

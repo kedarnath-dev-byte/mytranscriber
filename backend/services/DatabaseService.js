@@ -216,6 +216,86 @@ class DatabaseService {
     `).get(userId);
     return result.count;
   }
+  /**
+   * OFFLINE MODE METHODS
+   * Handle recordings saved while offline
+   */
+
+  /**
+   * Save a pending recording (offline mode)
+   * @param {string} uid - User ID
+   * @param {string} audioPath - Path to saved WAV file
+   * @param {number} duration - Recording duration in seconds
+   * @param {string} tier - User tier
+   * @returns {number} - Recording ID
+   */
+  savePendingRecording(uid, audioPath, duration, tier) {
+    const stmt = this.db.prepare(`
+      INSERT INTO recordings (uid, title, transcript, summary, duration, created_at, tier, status, audio_path)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      uid,
+      'Pending Recording', // Temporary title
+      null, // No transcript yet
+      null, // No summary yet
+      duration,
+      Date.now(),
+      tier,
+      'pending', // Status: pending
+      audioPath // Path to saved audio file
+    );
+
+    return result.lastInsertRowid;
+  }
+
+  /**
+   * Get all pending recordings across all users
+   * @returns {Array} - List of pending recordings
+   */
+  getPendingRecordings() {
+    const stmt = this.db.prepare(`
+      SELECT * FROM recordings 
+      WHERE status = 'pending' 
+      ORDER BY created_at ASC
+    `);
+    return stmt.all();
+  }
+
+  /**
+   * Update recording after successful processing
+   * @param {number} id - Recording ID
+   * @param {string} transcript - Transcription text
+   * @param {string} summary - AI summary
+   * @param {string} title - Generated title
+   */
+  updateRecordingAfterProcessing(id, transcript, summary, title) {
+    const stmt = this.db.prepare(`
+      UPDATE recordings 
+      SET transcript = ?, 
+          summary = ?, 
+          title = ?,
+          status = 'completed',
+          audio_path = NULL
+      WHERE id = ?
+    `);
+    stmt.run(transcript, summary, title, id);
+  }
+
+  /**
+   * Update recording status
+   * @param {number} id - Recording ID
+   * @param {string} status - New status (pending/processing/completed)
+   */
+  updateRecordingStatus(id, status) {
+    const stmt = this.db.prepare(`
+      UPDATE recordings 
+      SET status = ? 
+      WHERE id = ?
+    `);
+    stmt.run(status, id);
+  }
 }
 
 // Export single instance — used across entire app

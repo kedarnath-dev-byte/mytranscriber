@@ -38,7 +38,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage,
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB max (Whisper limit)
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB max
   fileFilter: (req, file, cb) => {
     const allowed = [
       'audio/webm', 'audio/mp4', 'audio/mpeg',
@@ -52,8 +52,7 @@ const upload = multer({
   },
 });
 
-// Auth middleware — all routes require login
-const requireAuth = authService.requireAuth();
+// ─── Auth Middleware ───────────────────────────────────────
 // Allow auth via session OR uid query/header (for Electron)
 function flexAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
@@ -73,89 +72,119 @@ function flexAuth(req, res, next) {
   console.log('❌ flexAuth failed — no valid uid');
   res.status(401).json({ success: false, message: 'User not found.' });
 }
-// ─── Upload & Process Recording ────────────────────────────
-router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
-  const filePath = req.file?.path;
 
+// ─── Upload & Process Recording (OFFLINE MODE SUPPORT) ─────
+router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
   try {
+    const { uid, tier } = req.user;
+    const { duration, durationSeconds } = req.body;
+    const recordDuration = parseInt(duration || durationSeconds) || 0;
+
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'No audio file provided',
+      return res.status(400).json({ error: 'No audio file provided' });
+    }
+
+    console.log('📁 Audio file received:', req.file.originalname);
+
+    // ===== OFFLINE MODE CHECK =====
+    const ConnectivityService = require('../services/ConnectivityService');
+    const online = await ConnectivityService.isOnline();
+
+    if (!online) {
+      // OFFLINE: Save audio for later processing
+      console.log('⚠️ OFFLINE MODE: Saving recording for background processing');
+
+      // Generate unique filename
+      const timestamp = Date.now();
+      const pendingFilename = `rec_${timestamp}.wav`;
+      const pendingPath = path.join(__dirname, '../../data/pending', pendingFilename);
+
+      // Move uploaded file to pending directory
+      fs.renameSync(req.file.path, pendingPath);
+
+      // Save to database with pending status
+      const recordingId = dbService.savePendingRecording(
+        uid,
+        pendingPath,
+        recordDuration,
+        tier
+      );
+
+      console.log(`💾 Saved as pending recording #${recordingId}`);
+
+      return res.status(202).json({
+        id: recordingId,
+        status: 'pending',
+        message: '⏳ Recording saved. Will process automatically when internet is available.',
+        title: 'Pending Recording',
+        duration: recordDuration
       });
     }
 
-    const userTier = req.user.tier || 'free';
-    const { mode, durationSeconds } = req.body;
+    // ===== ONLINE MODE: Process immediately =====
+    console.log('✅ ONLINE: Processing recording now');
 
-    // Check recording limit for free tier
-    const maxRecordings = hasFeature(userTier, 'maxRecordings');
-    if (maxRecordings !== Infinity) {
-      const count = dbService.getRecordingCountThisMonth(req.user.id);
-      if (count >= maxRecordings) {
-        return res.status(403).json({
-          success: false,
-          message: `Free tier limit reached (${maxRecordings} recordings/month). Please upgrade to Pro.`,
-          upgradeRequired: true,
-        });
-      }
-    }
-
-    // Read audio file as buffer
-    const audioBuffer = fs.readFileSync(filePath);
-
-    // Step 1 — Transcribe audio with Whisper
-    console.log(`🎙️ Starting transcription for user: ${req.user.email}`);
+    // Step 1: Transcribe
+    console.log('🎤 Starting transcription...');
     const transcript = await transcriptService.transcribe(
-      audioBuffer,
-      req.file.mimetype
+      req.file.path,
+      tier
+    );
+    console.log('✅ Transcription complete');
+
+    // Step 2: Generate summary
+    console.log('🤖 Generating summary...');
+    const summary = await summaryService.generateSummary(transcript, tier);
+    console.log('✅ Summary complete');
+
+    // Step 3: Generate title from summary
+    const title = summary.split('\n')[0].substring(0, 100) || 'Untitled Recording';
+
+    // Step 4: Save to database
+    const stmt = dbService.db.prepare(`
+      INSERT INTO recordings (uid, title, transcript, summary, duration, created_at, tier, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      uid,
+      title,
+      transcript,
+      summary,
+      recordDuration,
+      Date.now(),
+      tier,
+      'completed'
     );
 
-    // Step 2 — Analyze transcript with LLM
-    console.log(`🤖 Analyzing transcript (tier: ${userTier})`);
-    const analysis = await summaryService.analyze(transcript, userTier);
+    // Step 5: Cleanup temp file
+    if (fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
 
-    // Step 3 — Save to database
-    const recording = {
-      id: uuidv4(),
-      user_id: req.user.id,
-      title: analysis.title,
-      mode: mode || 'system',
-      duration_seconds: parseInt(durationSeconds) || 0,
-      transcript,
-      summary: analysis.summary,
-      action_items: JSON.stringify(analysis.action_items),
-      tier_used: userTier,
-    };
-
-    const saved = dbService.createRecording(recording);
+    console.log('✅ Recording saved successfully');
 
     res.json({
-      success: true,
-      data: {
-        ...saved,
-        action_items: analysis.action_items,
-      },
+      id: result.lastInsertRowid,
+      status: 'completed',
+      message: '✅ Recording processed successfully',
+      title,
+      duration: recordDuration
     });
 
-  } catch (err) {
-    console.error('❌ Recording processing failed:', err.message);
-    res.status(500).json({
-      success: false,
-      message: err.message || 'Processing failed. Check your API key.',
+  } catch (error) {
+    console.error('❌ Upload error:', error);
+    res.status(500).json({ 
+      error: 'Failed to process recording',
+      details: error.message 
     });
-  } finally {
-    // Always clean up uploaded temp file
-    if (filePath && fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
   }
 });
 
 // ─── Get All Recordings ────────────────────────────────────
 router.get('/', flexAuth, (req, res) => {
   try {
-    const recordings = dbService.getRecordingsByUser(req.user.id);
+    const recordings = dbService.getRecordingsByUser(req.user.uid);
     res.json({ success: true, data: recordings });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -167,7 +196,7 @@ router.get('/:id', flexAuth, (req, res) => {
   try {
     const recording = dbService.getRecordingById(req.params.id);
 
-    if (!recording || recording.user_id !== req.user.id) {
+    if (!recording || recording.uid !== req.user.uid) {
       return res.status(404).json({
         success: false,
         message: 'Recording not found',
@@ -183,7 +212,7 @@ router.get('/:id', flexAuth, (req, res) => {
 // ─── Delete Recording ──────────────────────────────────────
 router.delete('/:id', flexAuth, (req, res) => {
   try {
-    const deleted = dbService.deleteRecording(req.params.id, req.user.id);
+    const deleted = dbService.deleteRecording(req.params.id, req.user.uid);
 
     if (!deleted) {
       return res.status(404).json({

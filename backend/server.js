@@ -94,6 +94,13 @@ app.get('/health', (req, res) => {
   });
 });
 
+
+// ─── Initialize Background Processor ───────────────────────
+// 🎯 OFFLINE MODE — Auto-processes pending recordings
+const BackgroundProcessor = require('./services/BackgroundProcessor');
+const processor = new BackgroundProcessor(dbService);
+processor.start();
+
 // ─── Start Server ──────────────────────────────────────────
 app.listen(PORT, () => {
   console.log('');
@@ -102,8 +109,26 @@ app.listen(PORT, () => {
   console.log(`✅ Server running at http://localhost:${PORT}`);
   console.log(`✅ Environment: ${process.env.NODE_ENV}`);
   console.log(`✅ Frontend URL: ${process.env.FRONTEND_URL}`);
+  console.log(`🔄 Background processor active (checks every 30s)`);
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('');
+});
+
+// ─── Graceful Shutdown ─────────────────────────────────────
+// 🛑 Stop background processor when server shuts down
+// Prevents memory leaks and orphaned intervals
+process.on('SIGINT', () => {
+  console.log('\n⏹️  Shutting down gracefully...');
+  processor.stop();
+  console.log('✅ Background processor stopped');
+  process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+  console.log('\n⏹️  Shutting down gracefully...');
+  processor.stop();
+  console.log('✅ Background processor stopped');
+  process.exit(0);
 });
 
 module.exports = app;
