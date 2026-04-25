@@ -229,27 +229,26 @@ class DatabaseService {
    * @param {string} tier - User tier
    * @returns {number} - Recording ID
    */
-  savePendingRecording(uid, audioPath, duration, tier) {
+  savePendingRecording(userId, audioPath, duration, tier) {
     const stmt = this.db.prepare(`
-      INSERT INTO recordings (uid, title, transcript, summary, duration, created_at, tier, status, audio_path)
+      INSERT INTO recordings (user_id, title, transcript, summary, duration, created_at, tier, status, audio_path)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
-      uid,
-      'Pending Recording', // Temporary title
-      null, // No transcript yet
-      null, // No summary yet
+      userId,
+      'Pending Recording',
+      null,
+      null,
       duration,
       Date.now(),
       tier,
-      'pending', // Status: pending
-      audioPath // Path to saved audio file
+      'pending',
+      audioPath
     );
 
     return result.lastInsertRowid;
   }
-
   /**
    * Get all pending recordings across all users
    * @returns {Array} - List of pending recordings
@@ -296,6 +295,39 @@ class DatabaseService {
     `);
     stmt.run(status, id);
   }
+  /**
+   * Get all users in database
+   * @returns {Array} - All users
+   */
+  getAllUsers() {
+    const stmt = this.db.prepare('SELECT * FROM users ORDER BY created_at DESC');
+    return stmt.all();
+  }
+
+  /**
+   * Get all recordings in database
+   * @returns {Array} - All recordings
+   */
+  getAllRecordings() {
+    const stmt = this.db.prepare('SELECT * FROM recordings ORDER BY created_at DESC');
+    return stmt.all();
+  }
+
+  /**
+   * Find user by UID
+   * @param {string} uid - User UID
+   * @returns {Object} - User object or null
+   */
+ findUserById(id) {
+  const stmt = this.db.prepare('SELECT * FROM users WHERE id = ?');
+  try {
+    return stmt.get(id);
+  } catch (e) {
+    // Table might use different schema, try alternative
+    console.warn('⚠️ Column mismatch in findUserById:', e.message);
+    return null;
+  }
+}
 }
 
 // Export single instance — used across entire app

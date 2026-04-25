@@ -67,6 +67,43 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
     setTimeout(() => setCopied(false), 2000);
   }
 
+  // ─── Parse summary data ───────────────────────────
+  // Summary can be either JSON string or plain text
+  const parsedSummary = rec?.summary ? (() => {
+    try {
+      // Try parsing as JSON first
+      const parsed = JSON.parse(rec.summary);
+      return {
+        title: parsed.title || 'Summary',
+        text: parsed.summary || '',
+        actionItems: Array.isArray(parsed.action_items) ? parsed.action_items : []
+      };
+    } catch (e) {
+      // If not JSON, treat as plain text
+      return {
+        title: rec.title || 'Summary',
+        text: rec.summary || '',
+        actionItems: []
+      };
+    }
+  })() : { title: 'Summary', text: '', actionItems: [] };
+
+  // ─── Parse action items ───────────────────────────
+  let actionItems = [];
+  if (rec?.action_items) {
+    try {
+      const parsed = JSON.parse(rec.action_items);
+      actionItems = Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      actionItems = [];
+    }
+  }
+
+  // Use summary's action items if available, fallback to top-level
+  const displayActionItems = parsedSummary.actionItems.length > 0 
+    ? parsedSummary.actionItems 
+    : actionItems;
+
   if (loading) return (
     <div style={{
       display: 'flex', alignItems: 'center',
@@ -92,7 +129,6 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
 
   const meta        = MODE_META[rec.mode] || MODE_META.system;
   const tierColor   = TIER_COLORS[rec.tier_used] || TIER_COLORS.free;
-  const actionItems = Array.isArray(rec.action_items) ? rec.action_items : [];
 
   return (
     <div style={{
@@ -243,13 +279,15 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
                 border: '1px solid var(--border)',
                 lineHeight: 1.8, fontSize: 14,
                 userSelect: 'text',
+                whiteSpace: 'pre-wrap',
+                wordWrap: 'break-word',
               }}>
-                {rec.summary || 'No summary available.'}
+                {parsedSummary.text || 'No summary available.'}
               </div>
             </section>
 
             {/* Action Items */}
-            {actionItems.length > 0 ? (
+            {displayActionItems.length > 0 ? (
               <section>
                 <div style={{
                   fontSize: 11, fontWeight: 700,
@@ -263,7 +301,7 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
                 <div style={{
                   display: 'flex', flexDirection: 'column', gap: 8,
                 }}>
-                  {actionItems.map((item, i) => (
+                  {displayActionItems.map((item, i) => (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'flex-start', gap: 12,
                       padding: '12px 16px', borderRadius: 8,
@@ -285,7 +323,7 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
                         {i + 1}
                       </div>
                       <span style={{ fontSize: 13, lineHeight: 1.5 }}>
-                        {item}
+                        {typeof item === 'string' ? item : JSON.stringify(item)}
                       </span>
                     </div>
                   ))}
@@ -316,6 +354,7 @@ export default function TranscriptDetail({ id, onBack, onDelete }) {
             border: '1px solid var(--border)',
             lineHeight: 1.9, fontSize: 13,
             whiteSpace: 'pre-wrap',
+            wordWrap: 'break-word',
             userSelect: 'text',
             maxWidth: 800,
           }}>

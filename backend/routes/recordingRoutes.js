@@ -6,6 +6,8 @@
  * GET  /api/recordings         → Get all recordings for user
  * GET  /api/recordings/:id     → Get single recording with full transcript
  * DELETE /api/recordings/:id   → Delete a recording
+ * GET  /api/recordings/:id/export/pdf → Export as PDF
+ * GET  /api/recordings/:id/export/txt → Export as TXT
  *
  * 🤗 HF_DEPLOY — works as-is, just ensure temp folder is writable
  * 💳 PAYMENT_HOOK — tier limits enforced via tierMiddleware
@@ -53,15 +55,15 @@ const upload = multer({
 });
 
 // ─── Auth Middleware ───────────────────────────────────────
-// Allow auth via session OR uid query/header (for Electron)
+// Allow auth via session OR id query/header (for Electron)
 function flexAuth(req, res, next) {
   if (req.isAuthenticated()) return next();
 
-  const uid = req.query.uid || req.headers['x-user-id'];
-  console.log('🔑 flexAuth uid received:', uid);
+  const id = req.query.id || req.headers['x-user-id'];
+  console.log('🔑 flexAuth id received:', id);
 
-  if (uid) {
-    const user = dbService.findUserById(uid);
+  if (id) {
+    const user = dbService.findUserById(id);
     console.log('🔑 flexAuth user found:', user?.email);
     if (user) {
       req.user = user;
@@ -69,14 +71,14 @@ function flexAuth(req, res, next) {
     }
   }
 
-  console.log('❌ flexAuth failed — no valid uid');
+  console.log('❌ flexAuth failed — no valid id');
   res.status(401).json({ success: false, message: 'User not found.' });
 }
 
 // ─── Upload & Process Recording (OFFLINE MODE SUPPORT) ─────
 router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
   try {
-    const { uid, tier } = req.user;
+    const { id, tier } = req.user;
     const { duration, durationSeconds } = req.body;
     const recordDuration = parseInt(duration || durationSeconds) || 0;
 
@@ -104,7 +106,7 @@ router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
 
       // Save to database with pending status
       const recordingId = dbService.savePendingRecording(
-        uid,
+        id,
         pendingPath,
         recordDuration,
         tier
@@ -126,36 +128,39 @@ router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
 
     // Step 1: Transcribe
     console.log('🎤 Starting transcription...');
+    const audioBuffer = fs.readFileSync(req.file.path);
     const transcript = await transcriptService.transcribe(
-      req.file.path,
-      tier
+      audioBuffer,
+      req.file.mimetype
     );
     console.log('✅ Transcription complete');
 
     // Step 2: Generate summary
     console.log('🤖 Generating summary...');
-    const summary = await summaryService.generateSummary(transcript, tier);
+    const summary = await summaryService.analyze(transcript, tier);
     console.log('✅ Summary complete');
 
-    // Step 3: Generate title from summary
-    const title = summary.split('\n')[0].substring(0, 100) || 'Untitled Recording';
+    // Step 3: Generate title from analysis
+    const title = summary.title || 'Untitled Recording';
 
     // Step 4: Save to database
-    const stmt = dbService.db.prepare(`
-      INSERT INTO recordings (uid, title, transcript, summary, duration, created_at, tier, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const recording = {
+      id: uuidv4(),
+      user_id: req.user.id,
+      title: title,
+      mode: 'system',
+      duration_seconds: recordDuration,
+      transcript: transcript,
+      summary: JSON.stringify({
+        title: title,
+        summary: summary.summary || summary,
+        action_items: summary.action_items || []
+      }),
+      action_items: JSON.stringify(summary.action_items || []),
+      tier_used: tier,
+    };
 
-    const result = stmt.run(
-      uid,
-      title,
-      transcript,
-      summary,
-      recordDuration,
-      Date.now(),
-      tier,
-      'completed'
-    );
+    const result = dbService.createRecording(recording);
 
     // Step 5: Cleanup temp file
     if (fs.existsSync(req.file.path)) {
@@ -165,11 +170,11 @@ router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
     console.log('✅ Recording saved successfully');
 
     res.json({
-      id: result.lastInsertRowid,
-      status: 'completed',
-      message: '✅ Recording processed successfully',
-      title,
-      duration: recordDuration
+      success: true,
+      data: {
+        ...result,
+        action_items: summary.action_items || []
+      }
     });
 
   } catch (error) {
@@ -184,7 +189,7 @@ router.post('/upload', flexAuth, upload.single('audio'), async (req, res) => {
 // ─── Get All Recordings ────────────────────────────────────
 router.get('/', flexAuth, (req, res) => {
   try {
-    const recordings = dbService.getRecordingsByUser(req.user.uid);
+    const recordings = dbService.getRecordingsByUser(req.user.id);
     res.json({ success: true, data: recordings });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -196,7 +201,7 @@ router.get('/:id', flexAuth, (req, res) => {
   try {
     const recording = dbService.getRecordingById(req.params.id);
 
-    if (!recording || recording.uid !== req.user.uid) {
+    if (!recording || recording.user_id !== req.user.id) {
       return res.status(404).json({
         success: false,
         message: 'Recording not found',
@@ -212,18 +217,122 @@ router.get('/:id', flexAuth, (req, res) => {
 // ─── Delete Recording ──────────────────────────────────────
 router.delete('/:id', flexAuth, (req, res) => {
   try {
-    const deleted = dbService.deleteRecording(req.params.id, req.user.uid);
+    const recording = dbService.getRecordingById(req.params.id);
 
-    if (!deleted) {
+    if (!recording || recording.user_id !== req.user.id) {
       return res.status(404).json({
         success: false,
         message: 'Recording not found',
       });
     }
 
+    // Delete recording
+    const stmt = dbService.db.prepare('DELETE FROM recordings WHERE id = ?');
+    stmt.run(req.params.id);
+
     res.json({ success: true, message: 'Recording deleted' });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// ─── Export Recording as PDF ───────────────────────────
+router.get('/:id/export/pdf', flexAuth, async (req, res) => {
+  try {
+    const ExportService = require('../services/ExportService');
+    const { hasFeature } = require('../config/tiers');
+    
+    // Check tier
+    if (!hasFeature(req.user.tier, 'exportPDF')) {
+      return res.status(403).json({
+        success: false,
+        message: 'PDF export is available on Pro and Max plans only.'
+      });
+    }
+
+    // Get recording
+    const recording = dbService.getRecordingById(req.params.id);
+
+    if (!recording || recording.user_id !== req.user.id) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recording not found'
+      });
+    }
+
+    // Generate PDF
+    const filename = `${recording.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.pdf`;
+    const tempPath = path.join(__dirname, '../../temp', filename);
+
+    await ExportService.exportPDF(recording, tempPath);
+
+    // Send file
+    res.download(tempPath, filename, (err) => {
+      // Cleanup after download
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+      if (err) {
+        console.error('❌ Download error:', err);
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ PDF export error:', error);
+    res.status(500).json({ 
+      error: 'Failed to export PDF',
+      details: error.message 
+    });
+  }
+});
+
+// ─── Export Recording as TXT ───────────────────────────
+router.get('/:id/export/txt', flexAuth, async (req, res) => {
+  try {
+    const ExportService = require('../services/ExportService');
+    const { hasFeature } = require('../config/tiers');
+    
+    // Check tier
+    if (!hasFeature(req.user.tier, 'exportTXT')) {
+      return res.status(403).json({
+        success: false,
+        message: 'TXT export is available on Pro and Max plans only.'
+      });
+    }
+
+    // Get recording
+    const recording = dbService.getRecordingById(req.params.id);
+
+    if (!recording || recording.user_id !== req.user.id) {
+      return res.status(404).json({
+        success: false,
+        message: 'Recording not found'
+      });
+    }
+
+    // Generate TXT
+    const filename = `${recording.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`;
+    const tempPath = path.join(__dirname, '../../temp', filename);
+
+    await ExportService.exportTXT(recording, tempPath);
+
+    // Send file
+    res.download(tempPath, filename, (err) => {
+      // Cleanup after download
+      if (fs.existsSync(tempPath)) {
+        fs.unlinkSync(tempPath);
+      }
+      if (err) {
+        console.error('❌ Download error:', err);
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ TXT export error:', error);
+    res.status(500).json({ 
+      error: 'Failed to export TXT',
+      details: error.message 
+    });
   }
 });
 

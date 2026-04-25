@@ -28,6 +28,7 @@ const summaryService = require('./services/SummaryService');
 
 const authRoutes = require('./routes/authRoutes');
 const recordingRoutes = require('./routes/recordingRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 // ─── App Setup ─────────────────────────────────────────────
 const app = express();
@@ -83,6 +84,7 @@ app.use(passport.session());
 // ─── Routes ────────────────────────────────────────────────
 app.use('/auth', authRoutes);
 app.use('/api/recordings', recordingRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check — used by deployment platforms
 // 🤗 HF_DEPLOY — HuggingFace checks this endpoint
